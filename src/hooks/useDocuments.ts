@@ -1,10 +1,83 @@
+/**
+ * useDocuments Hook - Document management with auto-save and live queries.
+ *
+ * This hook provides a complete interface for document operations including:
+ * - CRUD operations (create, load, save, delete, rename)
+ * - Live query synchronization with IndexedDB
+ * - Auto-save with debouncing
+ * - Auto-load of last opened document on startup
+ * - Document reordering
+ *
+ * The hook combines Dexie live queries for reactive data updates with
+ * the document store for UI state management.
+ *
+ * @module hooks/useDocuments
+ *
+ * @example
+ * ```typescript
+ * import { useDocuments } from '@/hooks/useDocuments';
+ *
+ * function DocumentList() {
+ *   const {
+ *     documents,
+ *     currentDocument,
+ *     createDocument,
+ *     loadDocument,
+ *     deleteDocument,
+ *   } = useDocuments();
+ *
+ *   return (
+ *     <div>
+ *       <button onClick={() => createDocument('New Document')}>
+ *         Create Document
+ *       </button>
+ *       <ul>
+ *         {documents.map(doc => (
+ *           <li
+ *             key={doc.id}
+ *             onClick={() => loadDocument(doc.id)}
+ *             className={doc.id === currentDocument?.id ? 'active' : ''}
+ *           >
+ *             {doc.name}
+ *           </li>
+ *         ))}
+ *       </ul>
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+
 import { useCallback, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { documentService } from '@/services/documentService';
 import { useDocumentStore, useUIStore, useSpeechStore, useSettingsStore } from '@/stores';
 import type { Document, DocumentMeta } from '@/types';
+import { createLogger } from '@/utils/logger';
 
+const logger = createLogger('useDocuments');
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Auto-save debounce delay in milliseconds */
+const AUTO_SAVE_DELAY_MS = 2000;
+
+// ============================================================================
+// Hook Implementation
+// ============================================================================
+
+/**
+ * Hook for managing documents with auto-save and live query support.
+ *
+ * @returns Object containing document state and operations
+ */
 export function useDocuments() {
+  // ---------------------------------------------------------------------------
+  // Store Access
+  // ---------------------------------------------------------------------------
+
   const {
     currentDocumentId,
     currentDocument,
@@ -19,19 +92,35 @@ export function useDocuments() {
   const { addToast } = useUIStore();
   const { reset: resetSpeech } = useSpeechStore();
   const { lastDocumentId, setLastDocumentId } = useSettingsStore();
+
+  /** Ref to track if initial document has been auto-loaded */
   const hasAutoLoaded = useRef(false);
 
-  // Live query for documents list
+  // ---------------------------------------------------------------------------
+  // Live Query
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Live query for documents list.
+   * Automatically updates when IndexedDB data changes.
+   */
   const documents = useLiveQuery(
     () => documentService.getAllDocuments(),
     [],
     []
   );
 
-  // Update store when documents change
+  // ---------------------------------------------------------------------------
+  // Effects
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Syncs documents from live query to the store.
+   * Transforms full records to metadata for the sidebar.
+   */
   useEffect(() => {
     if (documents) {
-      const metas: DocumentMeta[] = documents.map(d => ({
+      const metas: DocumentMeta[] = documents.map((d) => ({
         id: d.id,
         name: d.name,
         createdAt: d.createdAt,
@@ -39,10 +128,14 @@ export function useDocuments() {
         sortOrder: d.sortOrder,
       }));
       setDocuments(metas);
+      logger.debug('Documents synced to store', { count: metas.length });
     }
   }, [documents, setDocuments]);
 
-  // Auto-load last document on startup
+  /**
+   * Auto-loads the last opened document on startup.
+   * Falls back to the first document if last document is not available.
+   */
   useEffect(() => {
     if (hasAutoLoaded.current || !documents || documents.length === 0 || currentDocumentId) {
       return;
@@ -51,12 +144,15 @@ export function useDocuments() {
     hasAutoLoaded.current = true;
 
     const loadInitialDocument = async () => {
+      logger.info('Auto-loading initial document');
+
       // Try to load the last opened document
       if (lastDocumentId) {
-        const docExists = documents.some(d => d.id === lastDocumentId);
+        const docExists = documents.some((d) => d.id === lastDocumentId);
         if (docExists) {
           const doc = await documentService.getDocument(lastDocumentId);
           if (doc) {
+            logger.info('Loaded last opened document', { id: doc.id, name: doc.name });
             setCurrentDocumentId(doc.id);
             setCurrentDocument(doc as Document);
             return;
@@ -67,6 +163,7 @@ export function useDocuments() {
       // Fallback: load the first document
       const firstDoc = await documentService.getDocument(documents[0].id);
       if (firstDoc) {
+        logger.info('Loaded first document as fallback', { id: firstDoc.id, name: firstDoc.name });
         setCurrentDocumentId(firstDoc.id);
         setCurrentDocument(firstDoc as Document);
         setLastDocumentId(firstDoc.id);
@@ -74,61 +171,133 @@ export function useDocuments() {
     };
 
     loadInitialDocument();
-  }, [documents, lastDocumentId, currentDocumentId, setCurrentDocumentId, setCurrentDocument, setLastDocumentId]);
+  }, [
+    documents,
+    lastDocumentId,
+    currentDocumentId,
+    setCurrentDocumentId,
+    setCurrentDocument,
+    setLastDocumentId,
+  ]);
 
-  const createDocument = useCallback(async (name?: string) => {
-    try {
-      setLoading(true);
-      const doc = await documentService.createDocument(name);
-      setCurrentDocumentId(doc.id);
-      setCurrentDocument(doc as Document);
-      addToast({ title: 'Document created', description: `"${doc.name}" has been created.` });
-      return doc;
-    } catch (error) {
-      addToast({
-        title: 'Error',
-        description: 'Failed to create document.',
-        variant: 'destructive'
-      });
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [setLoading, setCurrentDocumentId, setCurrentDocument, addToast]);
+  /**
+   * Auto-saves document content with debouncing.
+   * Triggers 2 seconds after content changes stop.
+   */
+  useEffect(() => {
+    if (!currentDocument || !hasUnsavedChanges) return;
 
-  const loadDocument = useCallback(async (id: string) => {
-    // Save current document if needed
-    if (currentDocument && hasUnsavedChanges) {
+    const timer = setTimeout(async () => {
+      logger.debug('Auto-saving document', { id: currentDocument.id });
       await documentService.updateDocument(currentDocument.id, {
         content: currentDocument.content,
-        lastReadPosition: currentDocument.lastReadPosition,
       });
-    }
+      setHasUnsavedChanges(false);
+      logger.debug('Auto-save complete');
+    }, AUTO_SAVE_DELAY_MS);
 
-    resetSpeech();
+    return () => clearTimeout(timer);
+  }, [currentDocument?.content, hasUnsavedChanges, currentDocument, setHasUnsavedChanges]);
 
-    try {
-      setLoading(true);
-      const doc = await documentService.getDocument(id);
-      if (doc) {
+  // ---------------------------------------------------------------------------
+  // Document Operations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Creates a new document and sets it as the current document.
+   *
+   * @param name - Optional name for the new document
+   * @returns The created document
+   */
+  const createDocument = useCallback(
+    async (name?: string) => {
+      logger.info('Creating new document', { name });
+
+      try {
+        setLoading(true);
+        const doc = await documentService.createDocument(name);
         setCurrentDocumentId(doc.id);
         setCurrentDocument(doc as Document);
-        setHasUnsavedChanges(false);
-        setLastDocumentId(doc.id);
+        addToast({ title: 'Document created', description: `"${doc.name}" has been created.` });
+        logger.info('Document created successfully', { id: doc.id });
+        return doc;
+      } catch (error) {
+        logger.error('Failed to create document', error);
+        addToast({
+          title: 'Error',
+          description: 'Failed to create document.',
+          variant: 'destructive',
+        });
+        throw error;
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      addToast({
-        title: 'Error',
-        description: 'Failed to load document.',
-        variant: 'destructive'
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [currentDocument, hasUnsavedChanges, resetSpeech, setLoading, setCurrentDocumentId, setCurrentDocument, setHasUnsavedChanges, setLastDocumentId, addToast]);
+    },
+    [setLoading, setCurrentDocumentId, setCurrentDocument, addToast]
+  );
 
+  /**
+   * Loads a document by ID, saving any unsaved changes first.
+   * Resets speech playback when switching documents.
+   *
+   * @param id - The document ID to load
+   */
+  const loadDocument = useCallback(
+    async (id: string) => {
+      logger.info('Loading document', { id });
+
+      // Save current document if needed
+      if (currentDocument && hasUnsavedChanges) {
+        logger.debug('Saving unsaved changes before switching');
+        await documentService.updateDocument(currentDocument.id, {
+          content: currentDocument.content,
+          lastReadPosition: currentDocument.lastReadPosition,
+        });
+      }
+
+      resetSpeech();
+
+      try {
+        setLoading(true);
+        const doc = await documentService.getDocument(id);
+        if (doc) {
+          setCurrentDocumentId(doc.id);
+          setCurrentDocument(doc as Document);
+          setHasUnsavedChanges(false);
+          setLastDocumentId(doc.id);
+          logger.info('Document loaded', { id: doc.id, name: doc.name });
+        }
+      } catch (error) {
+        logger.error('Failed to load document', error);
+        addToast({
+          title: 'Error',
+          description: 'Failed to load document.',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      currentDocument,
+      hasUnsavedChanges,
+      resetSpeech,
+      setLoading,
+      setCurrentDocumentId,
+      setCurrentDocument,
+      setHasUnsavedChanges,
+      setLastDocumentId,
+      addToast,
+    ]
+  );
+
+  /**
+   * Saves the current document to the database.
+   */
   const saveDocument = useCallback(async () => {
     if (!currentDocument) return;
+
+    logger.info('Saving document', { id: currentDocument.id });
 
     try {
       await documentService.updateDocument(currentDocument.id, {
@@ -137,85 +306,125 @@ export function useDocuments() {
       });
       setHasUnsavedChanges(false);
       addToast({ title: 'Saved', description: 'Document saved successfully.' });
+      logger.info('Document saved');
     } catch (error) {
+      logger.error('Failed to save document', error);
       addToast({
         title: 'Error',
         description: 'Failed to save document.',
-        variant: 'destructive'
+        variant: 'destructive',
       });
     }
   }, [currentDocument, setHasUnsavedChanges, addToast]);
 
-  const deleteDocument = useCallback(async (id: string) => {
-    try {
-      await documentService.deleteDocument(id);
-      if (currentDocumentId === id) {
-        setCurrentDocumentId(null);
-        setCurrentDocument(null);
-        resetSpeech();
+  /**
+   * Deletes a document by ID.
+   * If the deleted document is current, clears the selection.
+   *
+   * @param id - The document ID to delete
+   */
+  const deleteDocument = useCallback(
+    async (id: string) => {
+      logger.info('Deleting document', { id });
+
+      try {
+        await documentService.deleteDocument(id);
+        if (currentDocumentId === id) {
+          setCurrentDocumentId(null);
+          setCurrentDocument(null);
+          resetSpeech();
+        }
+        addToast({ title: 'Deleted', description: 'Document deleted.' });
+        logger.info('Document deleted', { id });
+      } catch (error) {
+        logger.error('Failed to delete document', error);
+        addToast({
+          title: 'Error',
+          description: 'Failed to delete document.',
+          variant: 'destructive',
+        });
       }
-      addToast({ title: 'Deleted', description: 'Document deleted.' });
-    } catch (error) {
-      addToast({
-        title: 'Error',
-        description: 'Failed to delete document.',
-        variant: 'destructive'
-      });
-    }
-  }, [currentDocumentId, setCurrentDocumentId, setCurrentDocument, resetSpeech, addToast]);
+    },
+    [currentDocumentId, setCurrentDocumentId, setCurrentDocument, resetSpeech, addToast]
+  );
 
-  const renameDocument = useCallback(async (id: string, name: string) => {
-    try {
-      await documentService.updateDocument(id, { name });
-      if (currentDocument?.id === id) {
-        setCurrentDocument({ ...currentDocument, name });
+  /**
+   * Renames a document.
+   *
+   * @param id - The document ID to rename
+   * @param name - The new name
+   */
+  const renameDocument = useCallback(
+    async (id: string, name: string) => {
+      logger.info('Renaming document', { id, name });
+
+      try {
+        await documentService.updateDocument(id, { name });
+        if (currentDocument?.id === id) {
+          setCurrentDocument({ ...currentDocument, name });
+        }
+        addToast({ title: 'Renamed', description: `Document renamed to "${name}".` });
+        logger.info('Document renamed', { id, name });
+      } catch (error) {
+        logger.error('Failed to rename document', error);
+        addToast({
+          title: 'Error',
+          description: 'Failed to rename document.',
+          variant: 'destructive',
+        });
       }
-      addToast({ title: 'Renamed', description: `Document renamed to "${name}".` });
-    } catch (error) {
-      addToast({
-        title: 'Error',
-        description: 'Failed to rename document.',
-        variant: 'destructive'
-      });
-    }
-  }, [currentDocument, setCurrentDocument, addToast]);
+    },
+    [currentDocument, setCurrentDocument, addToast]
+  );
 
-  const reorderDocuments = useCallback(async (documentIds: string[]) => {
-    try {
-      await documentService.reorderDocuments(documentIds);
-    } catch (error) {
-      addToast({
-        title: 'Error',
-        description: 'Failed to reorder documents.',
-        variant: 'destructive'
-      });
-    }
-  }, [addToast]);
+  /**
+   * Reorders documents by their IDs.
+   *
+   * @param documentIds - Array of document IDs in the new order
+   */
+  const reorderDocuments = useCallback(
+    async (documentIds: string[]) => {
+      logger.debug('Reordering documents', { count: documentIds.length });
 
-  // Auto-save on content change (debounced)
-  useEffect(() => {
-    if (!currentDocument || !hasUnsavedChanges) return;
+      try {
+        await documentService.reorderDocuments(documentIds);
+        logger.debug('Documents reordered');
+      } catch (error) {
+        logger.error('Failed to reorder documents', error);
+        addToast({
+          title: 'Error',
+          description: 'Failed to reorder documents.',
+          variant: 'destructive',
+        });
+      }
+    },
+    [addToast]
+  );
 
-    const timer = setTimeout(async () => {
-      await documentService.updateDocument(currentDocument.id, {
-        content: currentDocument.content,
-      });
-      setHasUnsavedChanges(false);
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [currentDocument?.content, hasUnsavedChanges]);
+  // ---------------------------------------------------------------------------
+  // Return Value
+  // ---------------------------------------------------------------------------
 
   return {
+    /** List of all documents (metadata only) */
     documents: documents || [],
+    /** The currently active document (full data) */
     currentDocument,
+    /** ID of the currently active document */
     currentDocumentId,
+    /** Whether there are unsaved changes */
     hasUnsavedChanges,
+    /** Creates a new document */
     createDocument,
+    /** Loads a document by ID */
     loadDocument,
+    /** Saves the current document */
     saveDocument,
+    /** Deletes a document by ID */
     deleteDocument,
+    /** Renames a document */
     renameDocument,
+    /** Reorders documents */
     reorderDocuments,
   };
 }
