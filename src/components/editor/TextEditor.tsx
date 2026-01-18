@@ -4,6 +4,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import Underline from '@tiptap/extension-underline';
 import { useDocumentStore, useSpeechStore } from '@/stores';
+import { useDocuments } from '@/hooks/useDocuments';
 import { EditorToolbar } from './EditorToolbar';
 import { useEffect, useRef, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
@@ -14,9 +15,15 @@ interface TextEditorProps {
 
 export function TextEditor({ scrollContainerRef }: TextEditorProps) {
   const { currentDocument, updateCurrentDocumentContent, setHasUnsavedChanges } = useDocumentStore();
+  const { createDocument } = useDocuments();
   const { currentWordIndex, wordPositions, isPlaying, setStartPosition } = useSpeechStore();
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLSpanElement | null>(null);
+  const isCreatingDocRef = useRef(false);
+
+  // Use ref to access latest currentDocument in callback without re-creating editor
+  const currentDocumentRef = useRef(currentDocument);
+  currentDocumentRef.current = currentDocument;
 
   const editor = useEditor({
     extensions: [
@@ -35,9 +42,26 @@ export function TextEditor({ scrollContainerRef }: TextEditorProps) {
         class: 'prose prose-lg max-w-none focus:outline-none min-h-[300px] p-4',
       },
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: async ({ editor }) => {
       const content = editor.getHTML();
-      updateCurrentDocumentContent(content);
+
+      // If no document exists and user is typing content, create one
+      if (!currentDocumentRef.current && !isCreatingDocRef.current) {
+        // Check if there's actual content (not just empty paragraph)
+        const text = editor.getText().trim();
+        if (text) {
+          isCreatingDocRef.current = true;
+          try {
+            await createDocument();
+            // After document is created, update with current content
+            updateCurrentDocumentContent(content);
+          } finally {
+            isCreatingDocRef.current = false;
+          }
+        }
+      } else {
+        updateCurrentDocumentContent(content);
+      }
     },
   });
 

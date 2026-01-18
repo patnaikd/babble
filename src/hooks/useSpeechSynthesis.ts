@@ -39,7 +39,16 @@ export function useSpeechSynthesis() {
   }, [reset, addToast]);
 
   const play = useCallback(() => {
-    if (!currentDocument?.content) {
+    if (isPaused) {
+      speechService.resume();
+      setPaused(false);
+      setPlaying(true);
+      return;
+    }
+
+    const plainText = extractPlainText(currentDocument?.content || '').trim();
+
+    if (!plainText) {
       addToast({
         title: 'No content',
         description: 'Please add some text to read.',
@@ -48,14 +57,6 @@ export function useSpeechSynthesis() {
       return;
     }
 
-    if (isPaused) {
-      speechService.resume();
-      setPaused(false);
-      setPlaying(true);
-      return;
-    }
-
-    const plainText = extractPlainText(currentDocument.content);
     const wordPositions = buildWordMap(plainText);
 
     setPlainText(plainText);
