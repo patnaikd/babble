@@ -103,6 +103,7 @@ class SpeechService {
 
     // Handle boundary events for word tracking
     this.utterance.onboundary = (event) => {
+      console.log('[SpeechService] Boundary event:', event.name, 'charIndex:', event.charIndex, 'charLength:', event.charLength);
       if (event.name === 'word') {
         options.onBoundary?.(event.charIndex + offsetAdjustment, event.charLength);
       }
@@ -113,9 +114,12 @@ class SpeechService {
     };
 
     this.utterance.onerror = (event) => {
+      // Ignore canceled/interrupted errors - these are expected when user stops playback
+      if (event.error === 'canceled' || event.error === 'interrupted') {
+        return;
+      }
+
       const errorMap: Record<string, SpeechErrorType> = {
-        'canceled': 'CANCELLED',
-        'interrupted': 'INTERRUPTED',
         'audio-busy': 'AUDIO_BUSY',
         'network': 'NETWORK',
         'not-allowed': 'NOT_ALLOWED',

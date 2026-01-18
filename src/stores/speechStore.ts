@@ -24,6 +24,9 @@ interface SpeechState {
   plainText: string;
   startFromPosition: number;
 
+  // Editor content (HTML from TipTap editor)
+  editorContent: string;
+
   // Actions
   setPlaying: (playing: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -33,6 +36,7 @@ interface SpeechState {
   setWordPositions: (positions: WordPosition[]) => void;
   setPlainText: (text: string) => void;
   setStartPosition: (position: number) => void;
+  setEditorContent: (content: string) => void;
   reset: () => void;
 }
 
@@ -46,6 +50,7 @@ export const useSpeechStore = create<SpeechState>((set) => ({
   wordPositions: [],
   plainText: '',
   startFromPosition: 0,
+  editorContent: '',
 
   setPlaying: (playing) => set({ isPlaying: playing }),
   setPaused: (paused) => set({ isPaused: paused }),
@@ -55,6 +60,7 @@ export const useSpeechStore = create<SpeechState>((set) => ({
   setWordPositions: (positions) => set({ wordPositions: positions }),
   setPlainText: (text) => set({ plainText: text }),
   setStartPosition: (position) => set({ startFromPosition: position }),
+  setEditorContent: (content) => set({ editorContent: content }),
   reset: () => set({
     isPlaying: false,
     isPaused: false,

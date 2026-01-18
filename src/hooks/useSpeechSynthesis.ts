@@ -12,6 +12,7 @@ export function useSpeechSynthesis() {
     selectedVoiceURI,
     rate,
     startFromPosition,
+    editorContent,
     setPlaying,
     setPaused,
     setCurrentWord,
@@ -20,7 +21,7 @@ export function useSpeechSynthesis() {
     reset,
   } = useSpeechStore();
 
-  const { currentDocument, updateLastReadPosition } = useDocumentStore();
+  const { updateLastReadPosition } = useDocumentStore();
   const { defaultVoiceURI, defaultRate } = useSettingsStore();
   const { addToast } = useUIStore();
 
@@ -46,7 +47,7 @@ export function useSpeechSynthesis() {
       return;
     }
 
-    const plainText = extractPlainText(currentDocument?.content || '').trim();
+    const plainText = extractPlainText(editorContent || '').trim();
 
     if (!plainText) {
       addToast({
@@ -83,7 +84,7 @@ export function useSpeechSynthesis() {
       onError: handleError,
     });
   }, [
-    currentDocument,
+    editorContent,
     isPaused,
     selectedVoiceURI,
     defaultVoiceURI,
