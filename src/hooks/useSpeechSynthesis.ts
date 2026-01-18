@@ -113,6 +113,59 @@ export function useSpeechSynthesis() {
     reset();
   }, [reset]);
 
+  const restartFromCurrentPosition = useCallback((options: { voiceURI?: string; rate?: number } = {}) => {
+    // If currently playing (not paused), restart speech from current position
+    if (isPlaying && !isPaused) {
+      const currentCharIndex = useSpeechStore.getState().currentCharIndex;
+      const plainText = useSpeechStore.getState().plainText;
+      const wordPositions = useSpeechStore.getState().wordPositions;
+      const currentRate = useSpeechStore.getState().rate;
+
+      if (!plainText) return;
+
+      // Cancel current speech
+      speechService.cancel();
+
+      const voiceToUse = options.voiceURI ?? selectedVoiceURI ?? defaultVoiceURI;
+      const rateToUse = options.rate ?? currentRate ?? defaultRate;
+
+      // Restart from current position
+      speechService.speak(plainText, {
+        voiceURI: voiceToUse,
+        rate: rateToUse,
+        startPosition: currentCharIndex,
+        onBoundary: (charIndex, _charLength) => {
+          const wordIndex = findWordAtPosition(charIndex, wordPositions);
+          setCurrentWord(charIndex, wordIndex);
+          updateLastReadPosition(charIndex);
+        },
+        onEnd: () => {
+          reset();
+          updateLastReadPosition(0);
+        },
+        onError: handleError,
+      });
+    }
+  }, [
+    isPlaying,
+    isPaused,
+    selectedVoiceURI,
+    defaultVoiceURI,
+    defaultRate,
+    setCurrentWord,
+    updateLastReadPosition,
+    reset,
+    handleError,
+  ]);
+
+  const changeRate = useCallback((newRate: number) => {
+    restartFromCurrentPosition({ rate: newRate });
+  }, [restartFromCurrentPosition]);
+
+  const changeVoice = useCallback((newVoiceURI: string) => {
+    restartFromCurrentPosition({ voiceURI: newVoiceURI });
+  }, [restartFromCurrentPosition]);
+
   const isSupported = speechService.isSupported();
 
   return {
@@ -123,5 +176,7 @@ export function useSpeechSynthesis() {
     play,
     pause,
     stop,
+    changeRate,
+    changeVoice,
   };
 }

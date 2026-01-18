@@ -1,15 +1,32 @@
 import { Editor } from '@tiptap/react';
-import { Bold, Italic, Underline, Heading1, Heading2, Heading3, List, ListOrdered, Undo, Redo } from 'lucide-react';
+import { Bold, Italic, Underline, Heading1, Heading2, Heading3, List, ListOrdered, Undo, Redo, FilePlus } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useDocuments } from '@/hooks/useDocuments';
 
 interface EditorToolbarProps {
   editor: Editor;
 }
 
 export function EditorToolbar({ editor }: EditorToolbarProps) {
+  const [isNewDocDialogOpen, setIsNewDocDialogOpen] = useState(false);
+  const [newDocName, setNewDocName] = useState('');
+  const { createDocument } = useDocuments();
+
+  const handleCreateDocument = async () => {
+    if (newDocName.trim()) {
+      await createDocument(newDocName.trim());
+      setNewDocName('');
+      setIsNewDocDialogOpen(false);
+    }
+  };
+
   const ToolbarButton = ({
     onClick,
     isActive,
@@ -110,6 +127,47 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
         icon={Redo}
         tooltip="Redo (Ctrl+Y)"
       />
+
+      <Separator orientation="vertical" className="h-6 mx-1" />
+
+      <ToolbarButton
+        onClick={() => setIsNewDocDialogOpen(true)}
+        icon={FilePlus}
+        tooltip="New Document"
+      />
+
+      <Dialog open={isNewDocDialogOpen} onOpenChange={setIsNewDocDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Document</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Document Name</Label>
+              <Input
+                id="name"
+                value={newDocName}
+                onChange={(e) => setNewDocName(e.target.value)}
+                placeholder="Enter document name"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleCreateDocument();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewDocDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateDocument} disabled={!newDocName.trim()}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

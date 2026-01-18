@@ -17,6 +17,7 @@ interface SettingsState {
   defaultRate: number;
   leftSidebarOpen: boolean;
   rightPanelOpen: boolean;
+  lastDocumentId: string | null;
 
   setFontFamily: (family: FontFamily) => void;
   setFontSize: (size: number) => void;
@@ -30,6 +31,7 @@ interface SettingsState {
   toggleRightPanel: () => void;
   setLeftSidebarOpen: (open: boolean) => void;
   setRightPanelOpen: (open: boolean) => void;
+  setLastDocumentId: (id: string | null) => void;
 }
 
 const storage = {
@@ -57,6 +59,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultRate: 1,
       leftSidebarOpen: true,
       rightPanelOpen: false,
+      lastDocumentId: null,
 
       setFontFamily: (family) => set({ fontFamily: family }),
       setFontSize: (size) => set({ fontSize: size }),
@@ -70,6 +73,7 @@ export const useSettingsStore = create<SettingsState>()(
       toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
       setLeftSidebarOpen: (open) => set({ leftSidebarOpen: open }),
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+      setLastDocumentId: (id) => set({ lastDocumentId: id }),
     }),
     {
       name: 'babble-settings',

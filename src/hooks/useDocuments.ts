@@ -1,7 +1,7 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { documentService } from '@/services/documentService';
-import { useDocumentStore, useUIStore, useSpeechStore } from '@/stores';
+import { useDocumentStore, useUIStore, useSpeechStore, useSettingsStore } from '@/stores';
 import type { Document, DocumentMeta } from '@/types';
 
 export function useDocuments() {
@@ -18,6 +18,8 @@ export function useDocuments() {
 
   const { addToast } = useUIStore();
   const { reset: resetSpeech } = useSpeechStore();
+  const { lastDocumentId, setLastDocumentId } = useSettingsStore();
+  const hasAutoLoaded = useRef(false);
 
   // Live query for documents list
   const documents = useLiveQuery(
@@ -39,6 +41,40 @@ export function useDocuments() {
       setDocuments(metas);
     }
   }, [documents, setDocuments]);
+
+  // Auto-load last document on startup
+  useEffect(() => {
+    if (hasAutoLoaded.current || !documents || documents.length === 0 || currentDocumentId) {
+      return;
+    }
+
+    hasAutoLoaded.current = true;
+
+    const loadInitialDocument = async () => {
+      // Try to load the last opened document
+      if (lastDocumentId) {
+        const docExists = documents.some(d => d.id === lastDocumentId);
+        if (docExists) {
+          const doc = await documentService.getDocument(lastDocumentId);
+          if (doc) {
+            setCurrentDocumentId(doc.id);
+            setCurrentDocument(doc as Document);
+            return;
+          }
+        }
+      }
+
+      // Fallback: load the first document
+      const firstDoc = await documentService.getDocument(documents[0].id);
+      if (firstDoc) {
+        setCurrentDocumentId(firstDoc.id);
+        setCurrentDocument(firstDoc as Document);
+        setLastDocumentId(firstDoc.id);
+      }
+    };
+
+    loadInitialDocument();
+  }, [documents, lastDocumentId, currentDocumentId, setCurrentDocumentId, setCurrentDocument, setLastDocumentId]);
 
   const createDocument = useCallback(async (name?: string) => {
     try {
@@ -78,6 +114,7 @@ export function useDocuments() {
         setCurrentDocumentId(doc.id);
         setCurrentDocument(doc as Document);
         setHasUnsavedChanges(false);
+        setLastDocumentId(doc.id);
       }
     } catch (error) {
       addToast({
@@ -88,7 +125,7 @@ export function useDocuments() {
     } finally {
       setLoading(false);
     }
-  }, [currentDocument, hasUnsavedChanges, resetSpeech, setLoading, setCurrentDocumentId, setCurrentDocument, setHasUnsavedChanges, addToast]);
+  }, [currentDocument, hasUnsavedChanges, resetSpeech, setLoading, setCurrentDocumentId, setCurrentDocument, setHasUnsavedChanges, setLastDocumentId, addToast]);
 
   const saveDocument = useCallback(async () => {
     if (!currentDocument) return;

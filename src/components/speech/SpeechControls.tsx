@@ -1,21 +1,23 @@
 import { Play, Pause, Square, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 import { useSpeechStore, useSettingsStore } from '@/stores';
 import { useEffect } from 'react';
 
+const SPEED_PRESETS = [0.5, 1, 1.25, 1.5, 2] as const;
+
 export function SpeechControls() {
-  const { voices, isPlaying, isPaused, isSupported, play, pause, stop } = useSpeechSynthesis();
+  const { voices, isPlaying, isPaused, isSupported, play, pause, stop, changeRate, changeVoice } = useSpeechSynthesis();
   const { selectedVoiceURI, rate, setVoice, setRate } = useSpeechStore();
   const { defaultVoiceURI, defaultRate, setDefaultVoice, setDefaultRate } = useSettingsStore();
 
   // Set default voice when voices load
   useEffect(() => {
-    if (voices.length > 0 && !selectedVoiceURI && !defaultVoiceURI) {
-      const defaultVoice = voices.find(v => v.default) || voices[0];
+    const enUSVoices = voices.filter(v => v.lang === 'en-US');
+    if (enUSVoices.length > 0 && !selectedVoiceURI && !defaultVoiceURI) {
+      const defaultVoice = enUSVoices.find(v => v.default) || enUSVoices[0];
       setVoice(defaultVoice.voiceURI);
       setDefaultVoice(defaultVoice.voiceURI);
     } else if (defaultVoiceURI && !selectedVoiceURI) {
@@ -114,37 +116,46 @@ export function SpeechControls() {
           onValueChange={(value) => {
             setVoice(value);
             setDefaultVoice(value);
+            changeVoice(value);
           }}
         >
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Select voice" />
           </SelectTrigger>
           <SelectContent>
-            {voices.map((voice) => (
-              <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
-                {voice.name} ({voice.lang})
-              </SelectItem>
-            ))}
+            {voices
+              .filter((voice) => voice.lang === 'en-US')
+              .map((voice) => (
+                <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
+                  {voice.name}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
       </div>
 
       {/* Speed Control */}
-      <div className="flex items-center gap-3 min-w-[180px]">
+      <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground whitespace-nowrap">
-          Speed: {rate.toFixed(1)}x
+          Speed:
         </span>
-        <Slider
-          value={[rate]}
-          onValueChange={([value]) => {
-            setRate(value);
-            setDefaultRate(value);
-          }}
-          min={0.5}
-          max={2}
-          step={0.1}
-          className="w-24"
-        />
+        <div className="flex items-center gap-1">
+          {SPEED_PRESETS.map((preset) => (
+            <Button
+              key={preset}
+              variant={rate === preset ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setRate(preset);
+                setDefaultRate(preset);
+                changeRate(preset);
+              }}
+              className="h-8 px-3 text-xs"
+            >
+              {preset}x
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   );
