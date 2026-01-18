@@ -12,11 +12,35 @@ interface TextEditorProps {
   scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }
 
+// Convert plain text position to ProseMirror document position
+function plainTextToProseMirrorPos(doc: any, plainTextPos: number): number {
+  let charCount = 0;
+  let result = 0;
+
+  doc.descendants((node: any, pos: number) => {
+    if (result) return false; // Already found
+
+    if (node.isText) {
+      const textLength = node.text?.length || 0;
+      if (charCount + textLength >= plainTextPos) {
+        // Found the node containing our position
+        result = pos + (plainTextPos - charCount);
+        return false;
+      }
+      charCount += textLength;
+    }
+    return true;
+  });
+
+  // If not found, return end of document
+  return result || doc.content.size;
+}
+
 export function TextEditor({ scrollContainerRef }: TextEditorProps) {
   const { currentDocument, updateCurrentDocumentContent, setHasUnsavedChanges } = useDocumentStore();
   const { currentWordIndex, wordPositions, isPlaying, setStartPosition, setEditorContent } = useSpeechStore();
   const editorContainerRef = useRef<HTMLDivElement>(null);
-  const highlightRef = useRef<HTMLSpanElement | null>(null);
+  const lastHighlightRef = useRef<{ from: number; to: number } | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -54,98 +78,70 @@ export function TextEditor({ scrollContainerRef }: TextEditorProps) {
     }
   }, [editor, currentDocument?.id, setHasUnsavedChanges, setEditorContent]);
 
-  // Handle word highlighting during speech using DOM manipulation
+  // Handle word highlighting during speech using TipTap's highlight mark
   useEffect(() => {
-    if (!editorContainerRef.current) return;
+    if (!editor) return;
 
-    // Remove previous highlight
-    if (highlightRef.current) {
-      const text = highlightRef.current.textContent || '';
-      const parent = highlightRef.current.parentNode;
-      if (parent) {
-        const textNode = document.createTextNode(text);
-        parent.replaceChild(textNode, highlightRef.current);
-        parent.normalize();
-      }
-      highlightRef.current = null;
+    // Remove previous highlight if exists
+    if (lastHighlightRef.current) {
+      const { from, to } = lastHighlightRef.current;
+      console.log('[TextEditor] Removing previous highlight at', from, '-', to);
+      editor.chain()
+        .setTextSelection({ from, to })
+        .unsetHighlight()
+        .run();
+      lastHighlightRef.current = null;
     }
 
-    if (!isPlaying || currentWordIndex < 0) return;
+    // If not playing or no valid word index, just clear and return
+    if (!isPlaying || currentWordIndex < 0) {
+      console.log('[TextEditor] Not playing or invalid word index:', { isPlaying, currentWordIndex });
+      return;
+    }
 
     const wordPos = wordPositions[currentWordIndex];
-    if (!wordPos) return;
-
-    // Find and highlight the word in the DOM
-    const proseMirror = editorContainerRef.current.querySelector('.ProseMirror');
-    if (!proseMirror) return;
-
-    const treeWalker = document.createTreeWalker(
-      proseMirror,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
-
-    let charCount = 0;
-    let node: Node | null;
-
-    while ((node = treeWalker.nextNode())) {
-      const textNode = node as Text;
-      const text = textNode.textContent || '';
-      const nodeStart = charCount;
-      const nodeEnd = charCount + text.length;
-
-      if (wordPos.start >= nodeStart && wordPos.start < nodeEnd) {
-        // Found the node containing the word
-        const localStart = wordPos.start - nodeStart;
-        const localEnd = Math.min(wordPos.end - nodeStart, text.length);
-
-        if (localStart < text.length && localEnd > localStart) {
-          const beforeText = text.slice(0, localStart);
-          const wordText = text.slice(localStart, localEnd);
-          const afterText = text.slice(localEnd);
-
-          const parent = textNode.parentNode;
-          if (parent) {
-            const fragment = document.createDocumentFragment();
-
-            if (beforeText) {
-              fragment.appendChild(document.createTextNode(beforeText));
-            }
-
-            const highlight = document.createElement('span');
-            highlight.className = 'speech-highlight';
-            highlight.textContent = wordText;
-            fragment.appendChild(highlight);
-            highlightRef.current = highlight;
-
-            if (afterText) {
-              fragment.appendChild(document.createTextNode(afterText));
-            }
-
-            parent.replaceChild(fragment, textNode);
-
-            // Auto-scroll to keep highlighted word visible
-            const rect = highlight.getBoundingClientRect();
-            const container = scrollContainerRef?.current || editorContainerRef.current;
-            if (container) {
-              const containerRect = container.getBoundingClientRect();
-              const middleTop = containerRect.top + containerRect.height / 3;
-              const middleBottom = containerRect.top + (2 * containerRect.height / 3);
-
-              if (rect.top < middleTop || rect.bottom > middleBottom) {
-                highlight.scrollIntoView({
-                  behavior: 'smooth',
-                  block: 'center',
-                });
-              }
-            }
-          }
-        }
-        break;
-      }
-      charCount += text.length;
+    if (!wordPos) {
+      console.log('[TextEditor] No word position for index:', currentWordIndex);
+      return;
     }
-  }, [currentWordIndex, wordPositions, isPlaying, scrollContainerRef]);
+
+    console.log('[TextEditor] Highlighting word:', wordPos.word, 'at plain text position', wordPos.start, '-', wordPos.end);
+
+    // Convert plain text positions to ProseMirror document positions
+    const from = plainTextToProseMirrorPos(editor.state.doc, wordPos.start);
+    const to = plainTextToProseMirrorPos(editor.state.doc, wordPos.end);
+
+    console.log('[TextEditor] ProseMirror positions:', from, '-', to);
+
+    // Apply highlight to the word
+    editor.chain()
+      .setTextSelection({ from, to })
+      .setHighlight({ color: '#fde047' }) // yellow-300
+      .run();
+
+    // Store the highlight position for cleanup
+    lastHighlightRef.current = { from, to };
+
+    // Auto-scroll to keep highlighted word visible
+    const container = scrollContainerRef?.current || editorContainerRef.current;
+    if (container) {
+      // Find the highlighted mark element
+      const highlightEl = container.querySelector('mark[data-color="#fde047"]');
+      if (highlightEl) {
+        const rect = highlightEl.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const middleTop = containerRect.top + containerRect.height / 3;
+        const middleBottom = containerRect.top + (2 * containerRect.height / 3);
+
+        if (rect.top < middleTop || rect.bottom > middleBottom) {
+          highlightEl.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        }
+      }
+    }
+  }, [editor, currentWordIndex, wordPositions, isPlaying, scrollContainerRef]);
 
   // Handle click to set start position
   const handleClick = () => {
