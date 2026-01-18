@@ -86,6 +86,10 @@ interface SettingsState {
   /** ID of the last opened document for session restore */
   lastDocumentId: string | null;
 
+  // Hydration State
+  /** Whether the store has been hydrated from IndexedDB */
+  _hasHydrated: boolean;
+
   // Actions - Typography
   /** Sets the font family for the editor */
   setFontFamily: (family: FontFamily) => void;
@@ -203,6 +207,9 @@ export const useSettingsStore = create<SettingsState>()(
       // Default values - Session
       lastDocumentId: null,
 
+      // Default values - Hydration
+      _hasHydrated: false,
+
       // Actions - Typography
       setFontFamily: (family) => {
         logger.info('Font family changed', { family });
@@ -272,6 +279,12 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'babble-settings',
       storage: createJSONStorage(() => storage),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state._hasHydrated = true;
+          logger.info('Settings hydrated from storage');
+        }
+      },
     }
   )
 );

@@ -11,10 +11,12 @@ const SPEED_PRESETS = [0.5, 1, 1.25, 1.5, 2] as const;
 export function SpeechControls() {
   const { voices, isPlaying, isPaused, isSupported, play, pause, stop, changeRate, changeVoice } = useSpeechSynthesis();
   const { selectedVoiceURI, rate, setVoice, setRate } = useSpeechStore();
-  const { defaultVoiceURI, defaultRate, setDefaultVoice, setDefaultRate } = useSettingsStore();
+  const { defaultVoiceURI, defaultRate, setDefaultVoice, setDefaultRate, _hasHydrated } = useSettingsStore();
 
-  // Initialize voice and rate from persisted settings
+  // Initialize voice from persisted settings (only after hydration)
   useEffect(() => {
+    if (!_hasHydrated) return;
+
     const enUSVoices = voices.filter(v => v.lang === 'en-US');
 
     // Initialize voice from persisted settings or pick a default
@@ -37,16 +39,18 @@ export function SpeechControls() {
         setDefaultVoice(defaultVoice.voiceURI);
       }
     }
-  }, [voices, selectedVoiceURI, defaultVoiceURI, setVoice, setDefaultVoice]);
+  }, [voices, selectedVoiceURI, defaultVoiceURI, setVoice, setDefaultVoice, _hasHydrated]);
 
-  // Initialize rate from persisted settings
+  // Initialize rate from persisted settings (only after hydration)
   useEffect(() => {
+    if (!_hasHydrated) return;
+
     if (defaultRate && defaultRate !== rate) {
       setRate(defaultRate);
     }
     // Only run on mount and when defaultRate changes from storage
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultRate]);
+  }, [defaultRate, _hasHydrated]);
 
   // Keyboard shortcuts
   useEffect(() => {
