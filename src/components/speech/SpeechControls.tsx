@@ -13,24 +13,40 @@ export function SpeechControls() {
   const { selectedVoiceURI, rate, setVoice, setRate } = useSpeechStore();
   const { defaultVoiceURI, defaultRate, setDefaultVoice, setDefaultRate } = useSettingsStore();
 
-  // Set default voice when voices load
+  // Initialize voice and rate from persisted settings
   useEffect(() => {
     const enUSVoices = voices.filter(v => v.lang === 'en-US');
-    if (enUSVoices.length > 0 && !selectedVoiceURI && !defaultVoiceURI) {
-      const defaultVoice = enUSVoices.find(v => v.default) || enUSVoices[0];
-      setVoice(defaultVoice.voiceURI);
-      setDefaultVoice(defaultVoice.voiceURI);
-    } else if (defaultVoiceURI && !selectedVoiceURI) {
-      setVoice(defaultVoiceURI);
+
+    // Initialize voice from persisted settings or pick a default
+    if (enUSVoices.length > 0 && !selectedVoiceURI) {
+      if (defaultVoiceURI) {
+        // Use persisted voice if it's still available
+        const voiceExists = enUSVoices.some(v => v.voiceURI === defaultVoiceURI);
+        if (voiceExists) {
+          setVoice(defaultVoiceURI);
+        } else {
+          // Fallback to system default or first available
+          const fallbackVoice = enUSVoices.find(v => v.default) || enUSVoices[0];
+          setVoice(fallbackVoice.voiceURI);
+          setDefaultVoice(fallbackVoice.voiceURI);
+        }
+      } else {
+        // No persisted voice, pick a default
+        const defaultVoice = enUSVoices.find(v => v.default) || enUSVoices[0];
+        setVoice(defaultVoice.voiceURI);
+        setDefaultVoice(defaultVoice.voiceURI);
+      }
     }
   }, [voices, selectedVoiceURI, defaultVoiceURI, setVoice, setDefaultVoice]);
 
-  // Set default rate
+  // Initialize rate from persisted settings
   useEffect(() => {
-    if (rate === 1 && defaultRate !== 1) {
+    if (defaultRate && defaultRate !== rate) {
       setRate(defaultRate);
     }
-  }, [rate, defaultRate, setRate]);
+    // Only run on mount and when defaultRate changes from storage
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultRate]);
 
   // Keyboard shortcuts
   useEffect(() => {
