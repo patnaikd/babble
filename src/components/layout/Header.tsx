@@ -9,7 +9,7 @@ export function Header() {
   const { hasUnsavedChanges, currentDocument } = useDocumentStore();
 
   return (
-    <header className="h-14 border-b bg-background flex items-center justify-between px-4 flex-shrink-0">
+    <header className="h-14 border-b flex items-center justify-between px-4 flex-shrink-0" style={{ backgroundColor: '#002d4d', color: '#ff6b5b' }}>
       <div className="flex items-center gap-2">
         <TooltipProvider>
           <Tooltip>
@@ -27,7 +27,7 @@ export function Header() {
         <h1 className="text-xl font-semibold">Babble</h1>
 
         {currentDocument && (
-          <span className="text-muted-foreground ml-2">
+          <span className="ml-2" style={{ color: '#a0d2ff' }}>
             {currentDocument.name}
             {hasUnsavedChanges && <span className="text-orange-500 ml-1">•</span>}
           </span>

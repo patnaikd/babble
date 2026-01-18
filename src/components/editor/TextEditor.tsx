@@ -116,7 +116,7 @@ export function TextEditor({ scrollContainerRef }: TextEditorProps) {
     // Apply highlight to the word
     editor.chain()
       .setTextSelection({ from, to })
-      .setHighlight({ color: '#fde047' }) // yellow-300
+      .setHighlight({ color: '#bbf7d0' }) // yellow-300
       .run();
 
     // Store the highlight position for cleanup
@@ -126,7 +126,7 @@ export function TextEditor({ scrollContainerRef }: TextEditorProps) {
     const container = scrollContainerRef?.current || editorContainerRef.current;
     if (container) {
       // Find the highlighted mark element
-      const highlightEl = container.querySelector('mark[data-color="#fde047"]');
+      const highlightEl = container.querySelector('mark[data-color="#bbf7d0"]');
       if (highlightEl) {
         const rect = highlightEl.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
