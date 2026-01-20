@@ -64,6 +64,9 @@ const logger = createLogger('useDocuments');
 /** Auto-save debounce delay in milliseconds */
 const AUTO_SAVE_DELAY_MS = 2000;
 
+/** Module-level flag to track if default document creation is in progress or done */
+let defaultDocumentCreationState: 'idle' | 'creating' | 'done' = 'idle';
+
 // ============================================================================
 // Hook Implementation
 // ============================================================================
@@ -91,7 +94,7 @@ export function useDocuments() {
 
   const { addToast } = useUIStore();
   const { reset: resetSpeech } = useSpeechStore();
-  const { lastDocumentId, setLastDocumentId } = useSettingsStore();
+  const { lastDocumentId, setLastDocumentId, _hasHydrated } = useSettingsStore();
 
   /** Ref to track if initial document has been auto-loaded */
   const hasAutoLoaded = useRef(false);
@@ -103,12 +106,9 @@ export function useDocuments() {
   /**
    * Live query for documents list.
    * Automatically updates when IndexedDB data changes.
+   * Returns undefined while loading, then the actual array once loaded.
    */
-  const documents = useLiveQuery(
-    () => documentService.getAllDocuments(),
-    [],
-    []
-  );
+  const documents = useLiveQuery(() => documentService.getAllDocuments(), []);
 
   // ---------------------------------------------------------------------------
   // Effects
@@ -119,18 +119,57 @@ export function useDocuments() {
    * Transforms full records to metadata for the sidebar.
    */
   useEffect(() => {
-    if (documents) {
-      const metas: DocumentMeta[] = documents.map((d) => ({
-        id: d.id,
-        name: d.name,
-        createdAt: d.createdAt,
-        updatedAt: d.updatedAt,
-        sortOrder: d.sortOrder,
-      }));
-      setDocuments(metas);
-      logger.debug('Documents synced to store', { count: metas.length });
+    if (documents === undefined) {
+      return;
     }
+    const metas: DocumentMeta[] = documents.map((d) => ({
+      id: d.id,
+      name: d.name,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+      sortOrder: d.sortOrder,
+    }));
+    setDocuments(metas);
+    logger.debug('Documents synced to store', { count: metas.length });
   }, [documents, setDocuments]);
+
+  /**
+   * Creates a default document when there are no documents.
+   * This ensures the app always has at least one document to work with.
+   * Uses module-level state to prevent duplicate creation in React Strict Mode.
+   */
+  useEffect(() => {
+    // Wait for settings to be hydrated and documents query to complete
+    if (!_hasHydrated || documents === undefined) {
+      return;
+    }
+
+    // Only create if idle and no documents exist
+    if (defaultDocumentCreationState !== 'idle' || documents.length > 0) {
+      return;
+    }
+
+    // Mark as creating immediately to prevent concurrent attempts
+    defaultDocumentCreationState = 'creating';
+
+    const createDefaultDocument = async () => {
+      logger.info('No documents found, creating default document');
+      try {
+        const doc = await documentService.createDocument('Untitled');
+        setCurrentDocumentId(doc.id);
+        setCurrentDocument(doc as Document);
+        setLastDocumentId(doc.id);
+        defaultDocumentCreationState = 'done';
+        logger.info('Default document created', { id: doc.id });
+      } catch (error) {
+        logger.error('Failed to create default document', error);
+        // Reset to idle on error so it can be retried
+        defaultDocumentCreationState = 'idle';
+      }
+    };
+
+    createDefaultDocument();
+  }, [_hasHydrated, documents, setCurrentDocumentId, setCurrentDocument, setLastDocumentId]);
 
   /**
    * Auto-loads the last opened document on startup.
